@@ -32,3 +32,8 @@ Caso o valor passe do limite determinado, o motorista está com os olhos fechado
 O programa repete todos os passos utilizando um pequeno delay entre cada execução por questões de performance.
 
 ## Imagens
+![PiCase](https://raw.githubusercontent.com/Kaisen-san/wakepi/master/Imagens/piCase.jpg) | ![Imp2](https://raw.githubusercontent.com/Kaisen-san/wakepi/master/Imagens/cameraCase.jpg)
+------------ | ------------
+Case Raspberry Pi | Case Câmera Raspberry Pi
+![CameraCase](https://raw.githubusercontent.com/Kaisen-san/wakepi/master/Imagens/piWithCase.jpg) | ![cameraCase](https://raw.githubusercontent.com/Kaisen-san/wakepi/master/Imagens/cameraWithCase.jpg)
+Raspberry Pi com Case | Camera com Case
