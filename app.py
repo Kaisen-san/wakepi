@@ -7,6 +7,7 @@ import RPi.GPIO as GPIO
 import time
 import signal
 import sys
+import traceback
 
 face_cascade = cv.CascadeClassifier('haarcascade_frontalface_default.xml')
 eye_cascade = cv.CascadeClassifier('haarcascade_eye.xml')
@@ -16,23 +17,28 @@ cam = cv.VideoCapture(0)
 buzzer = 18
 led = 4
 
-
-
 try:
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(buzzer, GPIO.OUT)
     GPIO.setup(led, GPIO.OUT)
 
-    limit = 175
     sleepCount = 0
     isAwake = True
     waitTime = 100
+    eyePropAvg = 0
+    eyePropCount = 0
+
+    GPIO.output(buzzer, GPIO.HIGH)
+    time.sleep(0.3)
+    GPIO.output(buzzer, GPIO.LOW)
+    time.sleep(0.1)
 
     while True:
         countWhite = 0
         countBlack = 0
         mean = ()
-        faceMean = ()
+        faceThreshold = []
+        eyeThreshold = []
         isToValidate = False
 
         ret, img = cam.read()
@@ -44,14 +50,10 @@ try:
             roi_gray = gray[y:y+h, x:x+w]
             roi_color = img[y:y+h, x:x+w]
             eyes = eye_cascade.detectMultiScale(roi_gray)
-            # Check the overall light level with this
-            # (handle the limit with this later or give up and go with the happy path?
-            faceMean = cv.mean(roi_gray)
 
             for (ex, ey, ew, eh) in eyes:
                 cv.rectangle(roi_color, (ex, ey), (ex+ew, ey+eh), (0, 255, 0), 2)
                 roi_gray2 = roi_gray[ey:ey+eh, ex:ex+ew]
-                retval, threshold = cv.threshold(roi_gray2, 50, 255, 0)
 
                 rec_xi = int(ew * 0.25)
                 rec_xf = int(ew * 0.75)
@@ -60,36 +62,63 @@ try:
 
                 cv.rectangle(roi_color, (rec_xi+ex, rec_yi+ey), (rec_xf+ex, rec_yf+ey), (0, 0, 255), 2)
 
+                imgMean = cv.mean(roi_gray)
+                faceRetval, faceThreshold = cv.threshold(roi_gray, imgMean[0]*0.7, 255, 0)
+                eyeRetval, eyeThreshold = cv.threshold(roi_gray2, imgMean[0]*0.7, 255, 0)
+
+                countWhite = 0
+                countBlack = 0
+
+                for row in range(0, h):
+                    for col in range(0, w):
+                        if faceThreshold[row][col] == 0:
+                            countBlack += 1
+                        else:
+                            countWhite += 1
+
+                mean = cv.mean(faceThreshold[0:h, 0:w])
+                currentFaceProp = mean[0] * countWhite / countBlack
+
                 countWhite = 0
                 countBlack = 0
 
                 for row in range(rec_yi, rec_yf):
                     for col in range(rec_xi, rec_xf):
-                        if threshold[row][col] == 0:
+                        if eyeThreshold[row][col] == 0:
                             countBlack += 1
                         else:
                             countWhite += 1
 
-                mean = cv.mean(threshold[rec_xi:rec_xf, rec_yi:rec_yf])
-                
-                isToValidate = True
-                #cv.imshow('threshold', threshold)
+                mean = cv.mean(eyeThreshold[rec_yi:rec_yf, rec_xi:rec_xf])
+                currentEyeProp = mean[0] * countWhite / countBlack
+
+                eyePropAvg = ((eyePropAvg * eyePropCount) + currentEyeProp) / (eyePropCount + 1)
+                eyePropCount += 1
+
+                if eyePropCount < 10:
+                    GPIO.output(led, GPIO.HIGH)
+                    time.sleep(0.3)
+                    GPIO.output(led, GPIO.LOW)
+                    time.sleep(0.3)
+                else:
+                    isToValidate = True
 
         cv.imshow('img', img)
+
+        if len(eyeThreshold) > 0:
+            cv.imshow('eye', eyeThreshold)
+            cv.imshow('face', faceThreshold)
 
         if isToValidate:
             GPIO.output(led, GPIO.HIGH) # It was able to detect both face and eyes
 
-#            print('Mean: {0:.3f}\tWhite: {1}\tBlack: {2}\t Prop: {3}'.format(mean[0], countWhite, countBlack, countWhite/countBlack))
-            print('MProp: {0:.3f} FaceMean: {1:.3f}'.format(mean[0] * countWhite/countBlack, faceMean[0]))
-
             # Decide whether the driver is or not awake
             isAwake = True
-            
-            # Explode the readings for more precision between open/closed eyes
-            currentReading = mean[0] * countWhite/countBlack
+
+            print('Current Eye Proportion: {0:.3f} Eye Proportion Average: {1:.3f}'.format(currentEyeProp, eyePropAvg))
+
             # If closed eyes, increment the counter
-            if currentReading > limit:
+            if currentEyeProp > (eyePropAvg * 1.2):
                 sleepCount += 1
             else:
                 sleepCount = 0
@@ -97,13 +126,13 @@ try:
             GPIO.output(led, GPIO.LOW) # It was NOT able to detect either face or eyes
 
         # If the counter passes a certain limit, the driver is determined to have fallen asleep
-        if sleepCount > 5:
+        if sleepCount > 3:
             isAwake = False
 
         # If they are asleep, wake them up (send a burst of sound every moment they're asleep)
         if not isAwake:
             GPIO.output(buzzer, GPIO.HIGH)
-            time.sleep(0.3)
+            time.sleep(0.5)
             GPIO.output(buzzer, GPIO.LOW)
             time.sleep(0.1)
             waitTime = 1 # Not sure if this is optimal
@@ -120,13 +149,14 @@ try:
 
         if 'q' == chr(c & 255):
             raise KeyboardInterrupt
-       
+
         cam.open(0)
 except KeyboardInterrupt:
     print('Bye!')
 except Exception as e:
-    print('Error: {0}.'.format(e))
+    print(traceback.format_exc())
 finally:
     cv.destroyAllWindows()
     GPIO.cleanup()
     sys.exit(0)
+ 
