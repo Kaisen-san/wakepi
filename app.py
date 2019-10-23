@@ -8,6 +8,24 @@ import time
 import signal
 import sys
 import traceback
+import requests
+
+def update(data):
+    for item in data:
+        url = 'https://industrial.api.ubidots.com/api/v1.6/devices/uc/' + item + '/values/'
+        headers = { 'X-Auth-Token': 'BBFF-aUhoRzohc6kSdcE5ACFBjOHkNnEtEH', 'Content-Type': 'application/json' }
+
+        json = { 'value': data[item] }
+
+        response = requests.post(url=url, headers=headers, json=json)
+
+def tryToUpdate(updateCount, data):
+    if (updateCount % 10 == 0):
+        update(data)
+
+        return 0
+
+    return updateCount
 
 face_cascade = cv.CascadeClassifier('haarcascade_frontalface_default.xml')
 eye_cascade = cv.CascadeClassifier('haarcascade_eye.xml')
@@ -27,6 +45,8 @@ try:
     waitTime = 100
     eyePropAvg = 0
     eyePropCount = 0
+    updateCount = 0
+    data = {}
 
     GPIO.output(buzzer, GPIO.HIGH)
     time.sleep(0.3)
@@ -34,6 +54,7 @@ try:
     time.sleep(0.1)
 
     while True:
+        updateCount += 1
         countWhite = 0
         countBlack = 0
         mean = ()
@@ -79,6 +100,8 @@ try:
                 mean = cv.mean(faceThreshold[0:h, 0:w])
                 currentFaceProp = mean[0] * countWhite / countBlack
 
+                data['luminosity'] = currentFaceProp
+
                 countWhite = 0
                 countBlack = 0
 
@@ -91,6 +114,9 @@ try:
 
                 mean = cv.mean(eyeThreshold[rec_yi:rec_yf, rec_xi:rec_xf])
                 currentEyeProp = mean[0] * countWhite / countBlack
+
+                data['white'] = countWhite
+                data['black'] = countBlack
 
                 eyePropAvg = ((eyePropAvg * eyePropCount) + currentEyeProp) / (eyePropCount + 1)
                 eyePropCount += 1
@@ -111,6 +137,7 @@ try:
 
         if isToValidate:
             GPIO.output(led, GPIO.HIGH) # It was able to detect both face and eyes
+            data['facedetection'] = 1
 
             # Decide whether the driver is or not awake
             isAwake = True
@@ -122,8 +149,11 @@ try:
                 sleepCount += 1
             else:
                 sleepCount = 0
+
+            data['sleep'] = sleepCount
         else:
             GPIO.output(led, GPIO.LOW) # It was NOT able to detect either face or eyes
+            data['facedetection'] = 0
 
         # If the counter passes a certain limit, the driver is determined to have fallen asleep
         if sleepCount > 3:
@@ -131,14 +161,19 @@ try:
 
         # If they are asleep, wake them up (send a burst of sound every moment they're asleep)
         if not isAwake:
+            data['driver'] = 0
+
             GPIO.output(buzzer, GPIO.HIGH)
             time.sleep(0.5)
             GPIO.output(buzzer, GPIO.LOW)
             time.sleep(0.1)
             waitTime = 1 # Not sure if this is optimal
         else:
+            data['driver'] = 1
+
             waitTime = 100
 
+        updateCount = tryToUpdate(updateCount, data)
         cam.release()
 
         c = cv.waitKey(waitTime) 
